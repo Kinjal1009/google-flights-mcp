@@ -173,20 +173,54 @@ async function searchFlights(params) {
     if (data.best_flights && data.best_flights.length > 0) {
       console.log('Found', data.best_flights.length, 'best flights');
       data.best_flights.forEach(flight => {
-        if (flight.flights && flight.flights[0]) {
-          const firstLeg = flight.flights[0];
-          flights.push({
+        if (flight.flights && flight.flights.length > 0) {
+
+          // For round-trip, we have multiple legs
+          const outboundFlight = flight.flights[0];
+          const returnFlight = isRoundTrip && flight.flights.length > 1 ? flight.flights[flight.flights.length - 1] : null;
+
+          const flightData = {
             type: 'best',
-            airline: firstLeg.airline || 'Unknown',
-            flight_number: firstLeg.flight_number || 'N/A',
-            departure_time: firstLeg.departure_airport?.time || 'N/A',
-            arrival_time: firstLeg.arrival_airport?.time || 'N/A',
-            duration: firstLeg.duration || 'N/A',
+            airline: outboundFlight.airline || 'Unknown',
+            flight_number: outboundFlight.flight_number || 'N/A',
             price: flight.price || 'N/A',
             stops: flight.flights.length - 1,
             carbon_emissions: flight.carbon_emissions?.this_flight || 'N/A',
             is_round_trip: isRoundTrip
-          });
+          };
+
+          // Outbound flight details
+          flightData.outbound = {
+            departure_time: outboundFlight.departure_airport?.time || 'N/A',
+            arrival_time: outboundFlight.arrival_airport?.time || 'N/A',
+            departure_airport: outboundFlight.departure_airport?.id || origin,
+            arrival_airport: outboundFlight.arrival_airport?.id || destination,
+            duration: outboundFlight.duration || 'N/A',
+            airline: outboundFlight.airline || 'Unknown',
+            flight_number: outboundFlight.flight_number || 'N/A'
+          };
+
+          // Return flight details (if round-trip)
+          if (returnFlight) {
+            flightData.return = {
+              departure_time: returnFlight.departure_airport?.time || 'N/A',
+              arrival_time: returnFlight.arrival_airport?.time || 'N/A',
+              departure_airport: returnFlight.departure_airport?.id || destination,
+              arrival_airport: returnFlight.arrival_airport?.id || origin,
+              duration: returnFlight.duration || 'N/A',
+              airline: returnFlight.airline || 'Unknown',
+              flight_number: returnFlight.flight_number || 'N/A'
+            };
+          }
+
+          // For backward compatibility, keep old fields for one-way
+          if (!isRoundTrip) {
+            flightData.departure_time = outboundFlight.departure_airport?.time || 'N/A';
+            flightData.arrival_time = outboundFlight.arrival_airport?.time || 'N/A';
+            flightData.duration = outboundFlight.duration || 'N/A';
+          }
+
+          flights.push(flightData);
         }
       });
     }
@@ -195,19 +229,52 @@ async function searchFlights(params) {
     if (data.other_flights && data.other_flights.length > 0) {
       console.log('Found', data.other_flights.length, 'other flights');
       data.other_flights.slice(0, 5).forEach(flight => {
-        if (flight.flights && flight.flights[0]) {
-          const firstLeg = flight.flights[0];
-          flights.push({
+        if (flight.flights && flight.flights.length > 0) {
+
+          const outboundFlight = flight.flights[0];
+          const returnFlight = isRoundTrip && flight.flights.length > 1 ? flight.flights[flight.flights.length - 1] : null;
+
+          const flightData = {
             type: 'other',
-            airline: firstLeg.airline || 'Unknown',
-            flight_number: firstLeg.flight_number || 'N/A',
-            departure_time: firstLeg.departure_airport?.time || 'N/A',
-            arrival_time: firstLeg.arrival_airport?.time || 'N/A',
-            duration: firstLeg.duration || 'N/A',
+            airline: outboundFlight.airline || 'Unknown',
+            flight_number: outboundFlight.flight_number || 'N/A',
             price: flight.price || 'N/A',
             stops: flight.flights.length - 1,
             is_round_trip: isRoundTrip
-          });
+          };
+
+          // Outbound flight details
+          flightData.outbound = {
+            departure_time: outboundFlight.departure_airport?.time || 'N/A',
+            arrival_time: outboundFlight.arrival_airport?.time || 'N/A',
+            departure_airport: outboundFlight.departure_airport?.id || origin,
+            arrival_airport: outboundFlight.arrival_airport?.id || destination,
+            duration: outboundFlight.duration || 'N/A',
+            airline: outboundFlight.airline || 'Unknown',
+            flight_number: outboundFlight.flight_number || 'N/A'
+          };
+
+          // Return flight details (if round-trip)
+          if (returnFlight) {
+            flightData.return = {
+              departure_time: returnFlight.departure_airport?.time || 'N/A',
+              arrival_time: returnFlight.arrival_airport?.time || 'N/A',
+              departure_airport: returnFlight.departure_airport?.id || destination,
+              arrival_airport: returnFlight.arrival_airport?.id || origin,
+              duration: returnFlight.duration || 'N/A',
+              airline: returnFlight.airline || 'Unknown',
+              flight_number: returnFlight.flight_number || 'N/A'
+            };
+          }
+
+          // For backward compatibility, keep old fields for one-way
+          if (!isRoundTrip) {
+            flightData.departure_time = outboundFlight.departure_airport?.time || 'N/A';
+            flightData.arrival_time = outboundFlight.arrival_airport?.time || 'N/A';
+            flightData.duration = outboundFlight.duration || 'N/A';
+          }
+
+          flights.push(flightData);
         }
       });
     }
