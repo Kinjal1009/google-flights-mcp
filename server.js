@@ -132,31 +132,46 @@ async function searchFlights(params) {
   try {
     const url = 'https://serpapi.com/search';
 
+    // ✅ FIX: Properly detect round-trip
+    const isRoundTrip = return_date && return_date !== null && return_date !== 'null' && return_date.trim() !== '';
+
+    console.log('=== FLIGHT SEARCH DEBUG ===');
+    console.log('Return date received:', return_date);
+    console.log('Is round trip?', isRoundTrip);
+    console.log('Trip type will be:', isRoundTrip ? '1 (round-trip)' : '2 (one-way)');
+
     const searchParams = {
       engine: 'google_flights',
       departure_id: origin,
       arrival_id: destination,
       outbound_date: departure_date,
-      type: '2',
-      currency: 'INR',
+      type: isRoundTrip ? '1' : '2',  // 1 = round-trip, 2 = one-way
+      currency: 'INR',  // Changed to INR
       hl: 'en',
       api_key: SERP_API_KEY
     };
 
-    console.log('Calling SerpAPI...');
+    // ✅ FIX: Only add return_date for round-trip
+    if (isRoundTrip) {
+      searchParams.return_date = return_date;
+      console.log('Added return_date to search:', return_date);
+    }
+
+    console.log('Calling SerpAPI with params:', JSON.stringify(searchParams, null, 2));
 
     const response = await axios.get(url, {
       params: searchParams,
       timeout: 30000
     });
 
-    console.log('SerpAPI response received');
+    console.log('SerpAPI response received, status:', response.status);
 
     const data = response.data;
     const flights = [];
 
     // Parse best flights
     if (data.best_flights && data.best_flights.length > 0) {
+      console.log('Found', data.best_flights.length, 'best flights');
       data.best_flights.forEach(flight => {
         if (flight.flights && flight.flights[0]) {
           const firstLeg = flight.flights[0];
@@ -168,7 +183,9 @@ async function searchFlights(params) {
             arrival_time: firstLeg.arrival_airport?.time || 'N/A',
             duration: firstLeg.duration || 'N/A',
             price: flight.price || 'N/A',
-            stops: flight.flights.length - 1
+            stops: flight.flights.length - 1,
+            carbon_emissions: flight.carbon_emissions?.this_flight || 'N/A',
+            is_round_trip: isRoundTrip
           });
         }
       });
@@ -176,6 +193,7 @@ async function searchFlights(params) {
 
     // Parse other flights
     if (data.other_flights && data.other_flights.length > 0) {
+      console.log('Found', data.other_flights.length, 'other flights');
       data.other_flights.slice(0, 5).forEach(flight => {
         if (flight.flights && flight.flights[0]) {
           const firstLeg = flight.flights[0];
@@ -187,32 +205,43 @@ async function searchFlights(params) {
             arrival_time: firstLeg.arrival_airport?.time || 'N/A',
             duration: firstLeg.duration || 'N/A',
             price: flight.price || 'N/A',
-            stops: flight.flights.length - 1
+            stops: flight.flights.length - 1,
+            is_round_trip: isRoundTrip
           });
         }
       });
     }
 
-    console.log(`Found ${flights.length} flights`);
+    console.log(`Total flights parsed: ${flights.length}`);
+    console.log('=== END DEBUG ===');
 
     return {
       success: true,
       route: `${origin} to ${destination}`,
       date: departure_date,
+      return_date: return_date || null,
+      trip_type: isRoundTrip ? 'round-trip' : 'one-way',
       flights: flights,
       total_results: flights.length,
       price_insights: data.price_insights || null
     };
 
   } catch (error) {
-    console.error('SerpAPI error:', error.message);
+    console.error('========================================');
+    console.error('SerpAPI ERROR:');
+    console.error('Message:', error.message);
+
     if (error.response) {
-      console.error('SerpAPI error response:', error.response.data);
+      console.error('Status:', error.response.status);
+      console.error('Response data:', error.response.data);
     }
+    console.error('========================================');
+
     return {
       success: false,
       error: error.message,
-      fallback_message: `Unable to fetch flights for ${origin} to ${destination} on ${departure_date}. Error: ${error.message}`
+      serp_error: error.response?.data || null,
+      fallback_message: `Unable to fetch flights for ${origin} to ${destination} on ${departure_date}. ${error.response?.data?.error || error.message}`
     };
   }
 }
