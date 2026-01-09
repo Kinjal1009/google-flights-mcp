@@ -4,8 +4,21 @@ const axios = require('axios');
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// ✅ CRITICAL: Proper CORS configuration for POST requests
+const corsOptions = {
+  origin: '*', // Allow all origins (change in production)
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+  maxAge: 86400 // Cache preflight for 24 hours
+};
+
+app.use(cors(corsOptions));
+
+// ✅ Handle OPTIONS preflight requests explicitly
+app.options('*', cors(corsOptions));
+
+// Parse JSON bodies
 app.use(express.json());
 
 // Configuration
@@ -19,14 +32,15 @@ console.log('SERP_API_KEY configured:', !!SERP_API_KEY);
 // Root endpoint
 app.get('/', (req, res) => {
   console.log('GET / - Root endpoint accessed');
-  res.json({
+  res.json({ 
     message: 'Google Flights MCP Server',
     status: 'running',
     version: '1.0.0',
+    port: PORT,
     endpoints: {
-      root: '/',
-      health: '/health',
-      execute: '/execute-tool (POST)'
+      root: 'GET /',
+      health: 'GET /health',
+      execute: 'POST /execute-tool'
     },
     timestamp: new Date().toISOString()
   });
@@ -35,51 +49,59 @@ app.get('/', (req, res) => {
 // Health check endpoint
 app.get('/health', (req, res) => {
   console.log('GET /health - Health check');
-  res.json({
+  res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     serp_configured: !!SERP_API_KEY,
-    port: PORT
+    port: PORT,
+    cors_enabled: true
   });
 });
 
-// Execute tool endpoint
+// ✅ CRITICAL: Execute tool endpoint with proper CORS
 app.post('/execute-tool', async (req, res) => {
-  console.log('POST /execute-tool - Received request');
+  console.log('========================================');
+  console.log('POST /execute-tool - Request received');
+  console.log('Headers:', req.headers);
   console.log('Body:', JSON.stringify(req.body, null, 2));
-
+  console.log('========================================');
+  
   try {
     const { tool, parameters } = req.body;
-
+    
     if (!tool) {
       return res.status(400).json({
         success: false,
-        error: 'Missing "tool" parameter'
+        error: 'Missing "tool" parameter',
+        received: req.body
       });
     }
-
+    
     if (!parameters) {
       return res.status(400).json({
         success: false,
-        error: 'Missing "parameters" parameter'
+        error: 'Missing "parameters" parameter',
+        received: req.body
       });
     }
-
+    
     if (tool === 'search_flights') {
       const result = await searchFlights(parameters);
+      console.log('Sending response:', result.success ? 'SUCCESS' : 'FAILED');
       res.json(result);
     } else {
-      res.status(400).json({
-        success: false,
+      res.status(400).json({ 
+        success: false, 
         error: 'Unknown tool: ' + tool,
         available_tools: ['search_flights']
       });
     }
   } catch (error) {
     console.error('Error in /execute-tool:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -87,9 +109,9 @@ app.post('/execute-tool', async (req, res) => {
 // Search flights function
 async function searchFlights(params) {
   console.log('searchFlights called with:', params);
-
+  
   const { origin, destination, departure_date, return_date } = params;
-
+  
   // Validate required parameters
   if (!origin || !destination || !departure_date) {
     return {
@@ -97,7 +119,7 @@ async function searchFlights(params) {
       error: 'Missing required parameters: origin, destination, or departure_date'
     };
   }
-
+  
   if (!SERP_API_KEY) {
     console.error('SERP_API_KEY not configured');
     return {
@@ -106,10 +128,10 @@ async function searchFlights(params) {
       fallback_message: 'MCP server configuration error - API key missing'
     };
   }
-
+  
   try {
     const url = 'https://serpapi.com/search';
-
+    
     const searchParams = {
       engine: 'google_flights',
       departure_id: origin,
@@ -120,19 +142,19 @@ async function searchFlights(params) {
       hl: 'en',
       api_key: SERP_API_KEY
     };
-
+    
     console.log('Calling SerpAPI...');
-
-    const response = await axios.get(url, {
+    
+    const response = await axios.get(url, { 
       params: searchParams,
-      timeout: 30000
+      timeout: 30000 
     });
-
+    
     console.log('SerpAPI response received');
-
+    
     const data = response.data;
     const flights = [];
-
+    
     // Parse best flights
     if (data.best_flights && data.best_flights.length > 0) {
       data.best_flights.forEach(flight => {
@@ -151,7 +173,7 @@ async function searchFlights(params) {
         }
       });
     }
-
+    
     // Parse other flights
     if (data.other_flights && data.other_flights.length > 0) {
       data.other_flights.slice(0, 5).forEach(flight => {
@@ -170,9 +192,9 @@ async function searchFlights(params) {
         }
       });
     }
-
+    
     console.log(`Found ${flights.length} flights`);
-
+    
     return {
       success: true,
       route: `${origin} to ${destination}`,
@@ -181,7 +203,7 @@ async function searchFlights(params) {
       total_results: flights.length,
       price_insights: data.price_insights || null
     };
-
+    
   } catch (error) {
     console.error('SerpAPI error:', error.message);
     if (error.response) {
@@ -210,10 +232,13 @@ app.use((req, res) => {
   });
 });
 
-// Start server
+// ✅ CRITICAL: Listen on 0.0.0.0 and use Railway's PORT
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Google Flights MCP Server running on port ${PORT}`);
-  console.log(`📍 Server is listening on 0.0.0.0:${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/health`);
-  console.log(`📍 SERP API configured: ${!!SERP_API_KEY}`);
+  console.log('========================================');
+  console.log(`🚀 Google Flights MCP Server RUNNING`);
+  console.log(`📍 Port: ${PORT}`);
+  console.log(`📍 Listening on: 0.0.0.0:${PORT}`);
+  console.log(`📍 CORS enabled: YES`);
+  console.log(`📍 SERP API: ${SERP_API_KEY ? 'CONFIGURED' : 'NOT CONFIGURED'}`);
+  console.log('========================================');
 });
