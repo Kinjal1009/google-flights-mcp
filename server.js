@@ -3,60 +3,113 @@ const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
+
+// Middleware
 app.use(cors());
 app.use(express.json());
 
+// Configuration
 const PORT = process.env.PORT || 3000;
 const SERP_API_KEY = process.env.SERP_API_KEY;
 
+console.log('Starting server...');
+console.log('PORT:', PORT);
+console.log('SERP_API_KEY configured:', !!SERP_API_KEY);
+
+// Root endpoint
+app.get('/', (req, res) => {
+  console.log('GET / - Root endpoint accessed');
+  res.json({
+    message: 'Google Flights MCP Server',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      root: '/',
+      health: '/health',
+      execute: '/execute-tool (POST)'
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
+  console.log('GET /health - Health check');
+  res.json({
     status: 'healthy',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    serp_configured: !!SERP_API_KEY,
+    port: PORT
   });
 });
 
 // Execute tool endpoint
 app.post('/execute-tool', async (req, res) => {
+  console.log('POST /execute-tool - Received request');
+  console.log('Body:', JSON.stringify(req.body, null, 2));
+
   try {
     const { tool, parameters } = req.body;
-    
-    console.log('Tool request:', tool, parameters);
-    
+
+    if (!tool) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing "tool" parameter'
+      });
+    }
+
+    if (!parameters) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing "parameters" parameter'
+      });
+    }
+
     if (tool === 'search_flights') {
       const result = await searchFlights(parameters);
       res.json(result);
     } else {
-      res.status(400).json({ 
-        success: false, 
-        error: 'Unknown tool: ' + tool 
+      res.status(400).json({
+        success: false,
+        error: 'Unknown tool: ' + tool,
+        available_tools: ['search_flights']
       });
     }
   } catch (error) {
-    console.error('Error:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    console.error('Error in /execute-tool:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
 
-// Search flights using SerpAPI
+// Search flights function
 async function searchFlights(params) {
+  console.log('searchFlights called with:', params);
+
   const { origin, destination, departure_date, return_date } = params;
-  
+
+  // Validate required parameters
+  if (!origin || !destination || !departure_date) {
+    return {
+      success: false,
+      error: 'Missing required parameters: origin, destination, or departure_date'
+    };
+  }
+
   if (!SERP_API_KEY) {
+    console.error('SERP_API_KEY not configured');
     return {
       success: false,
       error: 'SERP_API_KEY not configured',
-      fallback_message: 'MCP server configuration error'
+      fallback_message: 'MCP server configuration error - API key missing'
     };
   }
-  
+
   try {
     const url = 'https://serpapi.com/search';
-    
+
     const searchParams = {
       engine: 'google_flights',
       departure_id: origin,
@@ -67,17 +120,19 @@ async function searchFlights(params) {
       hl: 'en',
       api_key: SERP_API_KEY
     };
-    
-    console.log('Calling SerpAPI with:', searchParams);
-    
-    const response = await axios.get(url, { 
+
+    console.log('Calling SerpAPI...');
+
+    const response = await axios.get(url, {
       params: searchParams,
-      timeout: 30000 
+      timeout: 30000
     });
-    
+
+    console.log('SerpAPI response received');
+
     const data = response.data;
     const flights = [];
-    
+
     // Parse best flights
     if (data.best_flights && data.best_flights.length > 0) {
       data.best_flights.forEach(flight => {
@@ -91,13 +146,12 @@ async function searchFlights(params) {
             arrival_time: firstLeg.arrival_airport?.time || 'N/A',
             duration: firstLeg.duration || 'N/A',
             price: flight.price || 'N/A',
-            stops: flight.flights.length - 1,
-            carbon_emissions: flight.carbon_emissions?.this_flight || 'N/A'
+            stops: flight.flights.length - 1
           });
         }
       });
     }
-    
+
     // Parse other flights
     if (data.other_flights && data.other_flights.length > 0) {
       data.other_flights.slice(0, 5).forEach(flight => {
@@ -116,7 +170,9 @@ async function searchFlights(params) {
         }
       });
     }
-    
+
+    console.log(`Found ${flights.length} flights`);
+
     return {
       success: true,
       route: `${origin} to ${destination}`,
@@ -125,18 +181,39 @@ async function searchFlights(params) {
       total_results: flights.length,
       price_insights: data.price_insights || null
     };
-    
+
   } catch (error) {
     console.error('SerpAPI error:', error.message);
+    if (error.response) {
+      console.error('SerpAPI error response:', error.response.data);
+    }
     return {
       success: false,
       error: error.message,
-      fallback_message: `Unable to fetch flights for ${origin} to ${destination} on ${departure_date}. Please check airport codes and date format.`
+      fallback_message: `Unable to fetch flights for ${origin} to ${destination} on ${departure_date}. Error: ${error.message}`
     };
   }
 }
 
-app.listen(PORT, () => {
+// 404 handler for undefined routes
+app.use((req, res) => {
+  console.log(`404 - Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({
+    error: 'Route not found',
+    method: req.method,
+    path: req.path,
+    available_routes: {
+      'GET /': 'Server info',
+      'GET /health': 'Health check',
+      'POST /execute-tool': 'Execute MCP tool'
+    }
+  });
+});
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Google Flights MCP Server running on port ${PORT}`);
+  console.log(`📍 Server is listening on 0.0.0.0:${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/health`);
+  console.log(`📍 SERP API configured: ${!!SERP_API_KEY}`);
 });
