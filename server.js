@@ -138,7 +138,7 @@ async function searchFlights(params) {
       arrival_id: destination,
       outbound_date: departure_date,
       type: '2',
-      currency: 'USD',
+      currency: 'INR',
       hl: 'en',
       api_key: SERP_API_KEY
     };
