@@ -109,9 +109,9 @@ app.post('/execute-tool', async (req, res) => {
 // Search flights function
 async function searchFlights(params) {
   console.log('searchFlights called with:', params);
-
+  
   const { origin, destination, departure_date, return_date } = params;
-
+  
   // Validate required parameters
   if (!origin || !destination || !departure_date) {
     return {
@@ -119,7 +119,7 @@ async function searchFlights(params) {
       error: 'Missing required parameters: origin, destination, or departure_date'
     };
   }
-
+  
   if (!SERP_API_KEY) {
     console.error('SERP_API_KEY not configured');
     return {
@@ -128,160 +128,231 @@ async function searchFlights(params) {
       fallback_message: 'MCP server configuration error - API key missing'
     };
   }
-
+  
   try {
     const url = 'https://serpapi.com/search';
-
-    // ✅ FIX: Properly detect round-trip
+    
+    // Properly detect round-trip
     const isRoundTrip = return_date && return_date !== null && return_date !== 'null' && return_date.trim() !== '';
-
+    
     console.log('=== FLIGHT SEARCH DEBUG ===');
     console.log('Return date received:', return_date);
     console.log('Is round trip?', isRoundTrip);
     console.log('Trip type will be:', isRoundTrip ? '1 (round-trip)' : '2 (one-way)');
-
+    
     const searchParams = {
       engine: 'google_flights',
       departure_id: origin,
       arrival_id: destination,
       outbound_date: departure_date,
-      type: isRoundTrip ? '1' : '2',  // 1 = round-trip, 2 = one-way
-      currency: 'INR',  // Changed to INR
+      type: isRoundTrip ? '1' : '2',
+      currency: 'INR',
       hl: 'en',
       api_key: SERP_API_KEY
     };
-
-    // ✅ FIX: Only add return_date for round-trip
+    
+    // Only add return_date for round-trip
     if (isRoundTrip) {
       searchParams.return_date = return_date;
       console.log('Added return_date to search:', return_date);
     }
-
+    
     console.log('Calling SerpAPI with params:', JSON.stringify(searchParams, null, 2));
-
-    const response = await axios.get(url, {
+    
+    const response = await axios.get(url, { 
       params: searchParams,
-      timeout: 30000
+      timeout: 30000 
     });
-
+    
     console.log('SerpAPI response received, status:', response.status);
-
+    
     const data = response.data;
     const flights = [];
-
+    
     // Parse best flights
     if (data.best_flights && data.best_flights.length > 0) {
       console.log('Found', data.best_flights.length, 'best flights');
+      
       data.best_flights.forEach(flight => {
         if (flight.flights && flight.flights.length > 0) {
-
-          // For round-trip, we have multiple legs
-          const outboundFlight = flight.flights[0];
-          const returnFlight = isRoundTrip && flight.flights.length > 1 ? flight.flights[flight.flights.length - 1] : null;
-
+          console.log('Processing flight with', flight.flights.length, 'legs');
+          
           const flightData = {
             type: 'best',
-            airline: outboundFlight.airline || 'Unknown',
-            flight_number: outboundFlight.flight_number || 'N/A',
             price: flight.price || 'N/A',
-            stops: flight.flights.length - 1,
-            carbon_emissions: flight.carbon_emissions?.this_flight || 'N/A',
             is_round_trip: isRoundTrip
           };
-
-          // Outbound flight details
-          flightData.outbound = {
-            departure_time: outboundFlight.departure_airport?.time || 'N/A',
-            arrival_time: outboundFlight.arrival_airport?.time || 'N/A',
-            departure_airport: outboundFlight.departure_airport?.id || origin,
-            arrival_airport: outboundFlight.arrival_airport?.id || destination,
-            duration: outboundFlight.duration || 'N/A',
-            airline: outboundFlight.airline || 'Unknown',
-            flight_number: outboundFlight.flight_number || 'N/A'
-          };
-
-          // Return flight details (if round-trip)
-          if (returnFlight) {
+          
+          if (isRoundTrip && flight.flights.length >= 2) {
+            // Round-trip: Parse both legs
+            console.log('Parsing as ROUND-TRIP with', flight.flights.length, 'legs');
+            
+            // Find outbound (origin → destination)
+            const outboundLeg = flight.flights.find(leg => 
+              leg.departure_airport?.id === origin || 
+              leg.departure_airport?.name?.includes(origin)
+            ) || flight.flights[0];
+            
+            // Find return (destination → origin)
+            const returnLeg = flight.flights.find((leg, idx) => 
+              idx > 0 && (
+                leg.departure_airport?.id === destination || 
+                leg.arrival_airport?.id === origin ||
+                leg.departure_airport?.name?.includes(destination)
+              )
+            ) || flight.flights[flight.flights.length - 1];
+            
+            console.log('Outbound leg:', outboundLeg.departure_airport?.id, '→', outboundLeg.arrival_airport?.id);
+            console.log('Return leg:', returnLeg.departure_airport?.id, '→', returnLeg.arrival_airport?.id);
+            
+            // Outbound details
+            flightData.outbound = {
+              departure_time: outboundLeg.departure_airport?.time || 'N/A',
+              arrival_time: outboundLeg.arrival_airport?.time || 'N/A',
+              departure_airport: outboundLeg.departure_airport?.id || origin,
+              arrival_airport: outboundLeg.arrival_airport?.id || destination,
+              duration: outboundLeg.duration || 'N/A',
+              airline: outboundLeg.airline || 'Unknown',
+              flight_number: outboundLeg.flight_number || 'N/A'
+            };
+            
+            // Return details
             flightData.return = {
-              departure_time: returnFlight.departure_airport?.time || 'N/A',
-              arrival_time: returnFlight.arrival_airport?.time || 'N/A',
-              departure_airport: returnFlight.departure_airport?.id || destination,
-              arrival_airport: returnFlight.arrival_airport?.id || origin,
-              duration: returnFlight.duration || 'N/A',
-              airline: returnFlight.airline || 'Unknown',
-              flight_number: returnFlight.flight_number || 'N/A'
+              departure_time: returnLeg.departure_airport?.time || 'N/A',
+              arrival_time: returnLeg.arrival_airport?.time || 'N/A',
+              departure_airport: returnLeg.departure_airport?.id || destination,
+              arrival_airport: returnLeg.arrival_airport?.id || origin,
+              duration: returnLeg.duration || 'N/A',
+              airline: returnLeg.airline || 'Unknown',
+              flight_number: returnLeg.flight_number || 'N/A'
+            };
+            
+            // Main airline and flight number (use outbound)
+            flightData.airline = outboundLeg.airline || 'Unknown';
+            flightData.flight_number = outboundLeg.flight_number || 'N/A';
+            flightData.stops = flight.flights.length - 2; // Subtract 2 for outbound and return
+            
+            console.log('Round-trip flight data:', JSON.stringify(flightData, null, 2));
+            
+          } else {
+            // One-way: Parse single leg
+            console.log('Parsing as ONE-WAY');
+            
+            const leg = flight.flights[0];
+            
+            flightData.airline = leg.airline || 'Unknown';
+            flightData.flight_number = leg.flight_number || 'N/A';
+            flightData.departure_time = leg.departure_airport?.time || 'N/A';
+            flightData.arrival_time = leg.arrival_airport?.time || 'N/A';
+            flightData.duration = leg.duration || 'N/A';
+            flightData.stops = flight.flights.length - 1;
+            
+            // Also add to outbound for compatibility
+            flightData.outbound = {
+              departure_time: leg.departure_airport?.time || 'N/A',
+              arrival_time: leg.arrival_airport?.time || 'N/A',
+              departure_airport: leg.departure_airport?.id || origin,
+              arrival_airport: leg.arrival_airport?.id || destination,
+              duration: leg.duration || 'N/A',
+              airline: leg.airline || 'Unknown',
+              flight_number: leg.flight_number || 'N/A'
             };
           }
-
-          // For backward compatibility, keep old fields for one-way
-          if (!isRoundTrip) {
-            flightData.departure_time = outboundFlight.departure_airport?.time || 'N/A';
-            flightData.arrival_time = outboundFlight.arrival_airport?.time || 'N/A';
-            flightData.duration = outboundFlight.duration || 'N/A';
-          }
-
+          
           flights.push(flightData);
         }
       });
     }
-
+    
     // Parse other flights
     if (data.other_flights && data.other_flights.length > 0) {
       console.log('Found', data.other_flights.length, 'other flights');
+      
       data.other_flights.slice(0, 5).forEach(flight => {
         if (flight.flights && flight.flights.length > 0) {
-
-          const outboundFlight = flight.flights[0];
-          const returnFlight = isRoundTrip && flight.flights.length > 1 ? flight.flights[flight.flights.length - 1] : null;
-
+          
           const flightData = {
             type: 'other',
-            airline: outboundFlight.airline || 'Unknown',
-            flight_number: outboundFlight.flight_number || 'N/A',
             price: flight.price || 'N/A',
-            stops: flight.flights.length - 1,
             is_round_trip: isRoundTrip
           };
-
-          // Outbound flight details
-          flightData.outbound = {
-            departure_time: outboundFlight.departure_airport?.time || 'N/A',
-            arrival_time: outboundFlight.arrival_airport?.time || 'N/A',
-            departure_airport: outboundFlight.departure_airport?.id || origin,
-            arrival_airport: outboundFlight.arrival_airport?.id || destination,
-            duration: outboundFlight.duration || 'N/A',
-            airline: outboundFlight.airline || 'Unknown',
-            flight_number: outboundFlight.flight_number || 'N/A'
-          };
-
-          // Return flight details (if round-trip)
-          if (returnFlight) {
+          
+          if (isRoundTrip && flight.flights.length >= 2) {
+            // Round-trip: Parse both legs
+            
+            // Find outbound (origin → destination)
+            const outboundLeg = flight.flights.find(leg => 
+              leg.departure_airport?.id === origin || 
+              leg.departure_airport?.name?.includes(origin)
+            ) || flight.flights[0];
+            
+            // Find return (destination → origin)
+            const returnLeg = flight.flights.find((leg, idx) => 
+              idx > 0 && (
+                leg.departure_airport?.id === destination || 
+                leg.arrival_airport?.id === origin ||
+                leg.departure_airport?.name?.includes(destination)
+              )
+            ) || flight.flights[flight.flights.length - 1];
+            
+            // Outbound details
+            flightData.outbound = {
+              departure_time: outboundLeg.departure_airport?.time || 'N/A',
+              arrival_time: outboundLeg.arrival_airport?.time || 'N/A',
+              departure_airport: outboundLeg.departure_airport?.id || origin,
+              arrival_airport: outboundLeg.arrival_airport?.id || destination,
+              duration: outboundLeg.duration || 'N/A',
+              airline: outboundLeg.airline || 'Unknown',
+              flight_number: outboundLeg.flight_number || 'N/A'
+            };
+            
+            // Return details
             flightData.return = {
-              departure_time: returnFlight.departure_airport?.time || 'N/A',
-              arrival_time: returnFlight.arrival_airport?.time || 'N/A',
-              departure_airport: returnFlight.departure_airport?.id || destination,
-              arrival_airport: returnFlight.arrival_airport?.id || origin,
-              duration: returnFlight.duration || 'N/A',
-              airline: returnFlight.airline || 'Unknown',
-              flight_number: returnFlight.flight_number || 'N/A'
+              departure_time: returnLeg.departure_airport?.time || 'N/A',
+              arrival_time: returnLeg.arrival_airport?.time || 'N/A',
+              departure_airport: returnLeg.departure_airport?.id || destination,
+              arrival_airport: returnLeg.arrival_airport?.id || origin,
+              duration: returnLeg.duration || 'N/A',
+              airline: returnLeg.airline || 'Unknown',
+              flight_number: returnLeg.flight_number || 'N/A'
+            };
+            
+            // Main airline and flight number (use outbound)
+            flightData.airline = outboundLeg.airline || 'Unknown';
+            flightData.flight_number = outboundLeg.flight_number || 'N/A';
+            flightData.stops = flight.flights.length - 2;
+            
+          } else {
+            // One-way: Parse single leg
+            const leg = flight.flights[0];
+            
+            flightData.airline = leg.airline || 'Unknown';
+            flightData.flight_number = leg.flight_number || 'N/A';
+            flightData.departure_time = leg.departure_airport?.time || 'N/A';
+            flightData.arrival_time = leg.arrival_airport?.time || 'N/A';
+            flightData.duration = leg.duration || 'N/A';
+            flightData.stops = flight.flights.length - 1;
+            
+            // Also add to outbound for compatibility
+            flightData.outbound = {
+              departure_time: leg.departure_airport?.time || 'N/A',
+              arrival_time: leg.arrival_airport?.time || 'N/A',
+              departure_airport: leg.departure_airport?.id || origin,
+              arrival_airport: leg.arrival_airport?.id || destination,
+              duration: leg.duration || 'N/A',
+              airline: leg.airline || 'Unknown',
+              flight_number: leg.flight_number || 'N/A'
             };
           }
-
-          // For backward compatibility, keep old fields for one-way
-          if (!isRoundTrip) {
-            flightData.departure_time = outboundFlight.departure_airport?.time || 'N/A';
-            flightData.arrival_time = outboundFlight.arrival_airport?.time || 'N/A';
-            flightData.duration = outboundFlight.duration || 'N/A';
-          }
-
+          
           flights.push(flightData);
         }
       });
     }
-
+    
     console.log(`Total flights parsed: ${flights.length}`);
     console.log('=== END DEBUG ===');
-
+    
     return {
       success: true,
       route: `${origin} to ${destination}`,
@@ -292,18 +363,18 @@ async function searchFlights(params) {
       total_results: flights.length,
       price_insights: data.price_insights || null
     };
-
+    
   } catch (error) {
     console.error('========================================');
     console.error('SerpAPI ERROR:');
     console.error('Message:', error.message);
-
+    
     if (error.response) {
       console.error('Status:', error.response.status);
       console.error('Response data:', error.response.data);
     }
     console.error('========================================');
-
+    
     return {
       success: false,
       error: error.message,
