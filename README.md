@@ -28,8 +28,6 @@ Built using **Model Context Protocol (MCP)** architecture - demonstrating how AI
 
 ## 🎯 Demo - https://kinjal1009.github.io/google-flights-mcp/ai-flight-chat.html
 
-<img width="823" height="748" alt="Screenshot 2026-01-22 at 3 04 58 PM" src="https://github.com/user-attachments/assets/79f2da7c-5353-4ca8-bd52-ebf5f3b52179" />
-
 **Traditional Way:**
 ```
 ❌ Select origin airport: [dropdown with 500 options]
@@ -179,8 +177,4 @@ MIT License - see [LICENSE](LICENSE) file for details
 - Railway for easy deployment
 - Anthropic for MCP protocol inspiration
 
-## ⭐ Star History
-
-If you found this project helpful, please consider giving it a star!
-
-[![Star History Chart](https://api.star-history.com/svg?repos=yourusername/ai-flight-search&type=Date)](https://star-history.com/#yourusername/ai-flight-search&Date)
+<img width="823" height="748" alt="Screenshot 2026-01-22 at 3 04 58 PM" src="https://github.com/user-attachments/assets/79f2da7c-5353-4ca8-bd52-ebf5f3b52179" />
