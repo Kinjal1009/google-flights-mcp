@@ -433,25 +433,19 @@
             if (thinking) thinking.remove();
         }
 
-        async function callGemini(prompt) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-
-            const response = await fetch(url, {
+        async function callGeminiServer(prompt) {
+            const response = await fetch(`${MCP_SERVER_URL}/gemini`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
-                })
+                body: JSON.stringify({ prompt })
             });
 
             if (!response.ok) {
                 const error = await response.json();
                 throw new Error(error.error?.message || 'Gemini API error');
             }
-
             const data = await response.json();
-            return data.candidates[0].content.parts[0].text;
+            return data.response;
         }
 
         async function callMCPServer(origin, destination, date) {
@@ -503,42 +497,42 @@
                 // 🧠 SMART CONTEXT EXTRACTION
                 const extractPrompt = `You are extracting flight search parameters. MERGE new info with existing context.
 
-EXISTING CONTEXT:
-${JSON.stringify(searchContext, null, 2)}
+                EXISTING CONTEXT:
+                ${JSON.stringify(searchContext, null, 2)}
 
-NEW USER MESSAGE: "${message}"
+                NEW USER MESSAGE: "${message}"
 
-AIRPORTS: ${JSON.stringify(AIRPORTS, null, 2)}
-TODAY: ${getTodayDate()}
+                AIRPORTS: ${JSON.stringify(AIRPORTS, null, 2)}
+                TODAY: ${getTodayDate()}
 
-RULES:
-1. Keep existing values unless user changes them
-2. Extract NEW information from the message
-3. Merge with existing context
-4. Convert cities to IATA codes
-5. Convert dates: "tomorrow" = ${getTomorrowDate()}, "next week" = ${getNextWeekDate()}
+                RULES:
+                1. Keep existing values unless user changes them
+                2. Extract NEW information from the message
+                3. Merge with existing context
+                4. Convert cities to IATA codes
+                5. Convert dates: "tomorrow" = ${getTomorrowDate()}, "next week" = ${getNextWeekDate()}
 
-EXAMPLES:
+                EXAMPLES:
 
-Context: {"origin":null,"destination":null,"date":null}
-Message: "I want to go to Goa"
-Response: {"origin":null,"destination":"GOI","date":null}
+                Context: {"origin":null,"destination":null,"date":null}
+                Message: "I want to go to Goa"
+                Response: {"origin":null,"destination":"GOI","date":null}
 
-Context: {"origin":null,"destination":"GOI","date":null}
-Message: "From Mumbai"
-Response: {"origin":"BOM","destination":"GOI","date":null}
+                Context: {"origin":null,"destination":"GOI","date":null}
+                Message: "From Mumbai"
+                Response: {"origin":"BOM","destination":"GOI","date":null}
 
-Context: {"origin":"BOM","destination":"GOI","date":null}
-Message: "Tomorrow"
-Response: {"origin":"BOM","destination":"GOI","date":"${getTomorrowDate()}"}
+                Context: {"origin":"BOM","destination":"GOI","date":null}
+                Message: "Tomorrow"
+                Response: {"origin":"BOM","destination":"GOI","date":"${getTomorrowDate()}"}
 
-Context: {"origin":"BOM","destination":"DEL","date":"2026-01-15"}
-Message: "Actually, make it Bangalore"
-Response: {"origin":"BOM","destination":"BLR","date":"2026-01-15"}
+                Context: {"origin":"BOM","destination":"DEL","date":"2026-01-15"}
+                Message: "Actually, make it Bangalore"
+                Response: {"origin":"BOM","destination":"BLR","date":"2026-01-15"}
 
-Respond ONLY with JSON:`;
+                Respond ONLY with JSON:`;
 
-                const extracted = await callGemini(extractPrompt);
+                const extracted = await callGeminiServer(extractPrompt);
                 console.log('Extracted:', extracted);
 
                 // Parse the response
@@ -608,23 +602,24 @@ Respond ONLY with JSON:`;
                     const flightHtml = `
                         <div class="flight-card">
                             <div class="flight-header">
-                                <span class="flight-airline">✈️ ${flight.airline} ${flight.flight_number || ''}</span>
-                                <span class="flight-price">₹${flight.price} ${isCheapest ? '⭐ CHEAPEST' : ''}</span>
+                                <span class="flight-airline">✈️ ${flight.airline} (${flight.flight_number || 'Direct'})</span>
                             </div>
                             <div style="font-size: 14px; color: #555;">
-                                <b>Departs:</b> ${flight.departure_time} | <b>Arrives:</b> ${flight.arrival_time}<br>
-                                <small>${flight.duration} min | ${flight.stops === 0 ? 'Non-stop' : flight.stops + ' stops'}</small>
+                                <b>Departs:</b> ${flight.departure_time || flight.departure} <br>
+                                <b>Arrives:</b> ${flight.arrival_time || flight.arrival} <br>
+                                <small>${flight.duration || ''} | ${flight.stops === 0 ? 'Non-stop' : flight.stops + ' stops'}</small>
                             </div>
+                            <div style="font-size: 18px; color: #DDD;">
+                                <span class="flight-price">₹${flight.price} ${isCheapest ? '⭐' : ''}</span>
+                            </div>
+                            <button onclick="window.open('${flight.extensions?.[0] || 'https://www.google.com/travel/flights'}', '_blank')"
+                                    style="margin-top:10px; width:100%; padding:5px; cursor:pointer; background:#4285f4; color:white; border:none; border-radius:4px;">
+                                View on Google Flights
+                            </button>
                         </div>
                     `;
                     addMessage('assistant', flightHtml);
                 });
-
-                // // Reset context after successful search
-                // setTimeout(() => {
-                //     addMessage('assistant', '💬 Want to search again? Just tell me where you want to go!');
-                //     resetContext();
-                // }, 2000);
 
             } catch (error) {
                 console.error('Error:', error);

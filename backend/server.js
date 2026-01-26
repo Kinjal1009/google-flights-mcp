@@ -22,6 +22,7 @@ app.use(express.json());
 // Configuration
 const PORT = process.env.PORT || 3000;
 const SERP_API_KEY = process.env.SERP_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 console.log('Starting server...');
 console.log('PORT:', PORT);
@@ -54,6 +55,38 @@ app.get('/health', (req, res) => {
     port: PORT,
     cors_enabled: true
   });
+});
+
+async function callGemini(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error?.message || 'Gemini API error');
+  }
+
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
+}
+
+app.post('/gemini', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    const response = await callGemini(prompt);
+    res.json({ response });
+  } catch (error) {
+    console.error('Error in /gemini:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Execute tool endpoint
